@@ -6,36 +6,28 @@
 # MODULE:      r.kde
 # AUTHOR(S):   Christian Kaiser
 # PURPOSE:     Computes the Gaussian kernel density for a raster map.
-# VERSION:     1.0.0 (2010-01-09)
+# VERSION:     1.1.0 (2017-07-02)
 #
-# COPYRIGHT:   (C) 2010 by Christian Kaiser
+# COPYRIGHT:   (C) 2010-2017 by Christian Kaiser
 #
 #############################################################################
 #
 # REQUIREMENTS:
-#      - numpy: http://numpy.scipy.org
+# numpy, gdal
 
-
-
-"""
-If a bandwidth of 0 is provided, it will be estimated automatically using the 
-formula provided in Fotherhingham, S., Brundson, C., and Charlton, M. (2000). 
-Quantitative geography: perspectives on spatial data analysis. Los Angeles: 
-Sage, p. 149. Automatic bandwidth estimation is default.
-"""
 
 
 import math as m
 import numpy as np
 from optparse import OptionParser
 import os
-import osgeo.gdal as gdal
+import gdal
 import shutil
 import struct
 import sys
 
 
-USAGE = """r.kde --input input_raster --output output_raster [--bandwidth bandwidth] --normalize"""
+USAGE = """r.kde --input input_raster --output output_raster --bandwidth bandwidth --normalize"""
 
 
 def kde(options):
@@ -69,32 +61,11 @@ def kde(options):
     rast = rast.reshape((size[1], size[0])).T
     
     # Find the number of non-zero raster cells in the input data.
-    npts = np.sum(rast > 0)
+    npts = np.sum(rast != 0)
     
-    # Estimate the bandwidth if it is not given. 
-    # For the formula, see Fotheringham et al. 2000.
+    # Bandwidth must be positive value
     if bandwidth == None or bandwidth <= 0:
-        print("   No bandwidth provided. Estimating bandwidth...")
-        # We need to get the coordinates of all non-zero points.
-        # Do it separately for x and y coordinates for minimizing 
-        # memory requirements.
-        coords = []
-        for j in range(0, size[1]):
-            for i in range(0, size[0]):
-                if rast[i,j] > 0:
-                    coords.append((i * res[0]) + georef[0])
-        std_x = np.std(coords)
-        del(coords)
-        coords = []
-        for j in range(0, size[1]):
-            for i in range(0, size[0]):
-                if rast[i,j] > 0:
-                    coords.append(georef[3] - (j * res[1]))
-        std_y = np.std(coords)
-        del(coords)
-        std = (std_x + std_y) / 2.0
-        bandwidth = (2.0 / (3.0 * npts))**0.25 * std
-        print("   Estimated bandwidth [in map units]: %f" % bandwidth)
+        raise Exception("Error. Bandwidth must be a positive value.")
     
     # We compute the values only up to a distance of 20 * bandwidth from the 
     # centre for performance reasons.
@@ -140,22 +111,22 @@ def kde(options):
                 print("      %d0%% done" % new_pct_done)
                 pct_done = new_pct_done
             cnt += 1
-            if rast[i,j] > 0:
-                k1 = rast[i,j] * k
-                kde_minx = np.max((i - maxdist_cells, 0))
-                kde_maxx = np.min((i + maxdist_cells + 1, size[0]))
-                kde_miny = np.max((j - maxdist_cells, 0))
-                kde_maxy = np.min((j + maxdist_cells + 1, size[1]))
-                k1_minx = kde_minx - (i - maxdist_cells)
-                k1_maxx =  np.min([
-                    ((2 * maxdist_cells + 1) - ((i + maxdist_cells + 1) - size[0])), 
-                    2 * maxdist_cells + 1
-                ])
-                k1_miny = kde_miny - (j - maxdist_cells)
-                k1_maxy = np.min([
-                    ((2 * maxdist_cells + 1) - ((j + maxdist_cells + 1) - size[1])), 
-                    2 * maxdist_cells + 1])
-                kde[kde_minx:kde_maxx, kde_miny:kde_maxy] += k1[k1_minx:k1_maxx, k1_miny:k1_maxy]
+
+            k1 = rast[i,j] * k
+            kde_minx = np.max((i - maxdist_cells, 0))
+            kde_maxx = np.min((i + maxdist_cells + 1, size[0]))
+            kde_miny = np.max((j - maxdist_cells, 0))
+            kde_maxy = np.min((j + maxdist_cells + 1, size[1]))
+            k1_minx = kde_minx - (i - maxdist_cells)
+            k1_maxx =  np.min([
+                ((2 * maxdist_cells + 1) - ((i + maxdist_cells + 1) - size[0])), 
+                2 * maxdist_cells + 1
+            ])
+            k1_miny = kde_miny - (j - maxdist_cells)
+            k1_maxy = np.min([
+                ((2 * maxdist_cells + 1) - ((j + maxdist_cells + 1) - size[1])), 
+                2 * maxdist_cells + 1])
+            kde[kde_minx:kde_maxx, kde_miny:kde_maxy] += k1[k1_minx:k1_maxx, k1_miny:k1_maxy]
     
     # Write out the grid values to a copy of the input raster file
     print('   Writing the kernel density to the output raster file...')
@@ -163,7 +134,7 @@ def kde(options):
     # Check if the input dataset driver is able to create a copy,
     # and create the copy
     drvr_info = in_driver.GetMetadata()
-    if (drvr_info.has_key(gdal.DCAP_CREATECOPY) and 
+    if (drvr_info.get(gdal.DCAP_CREATECOPY, None) and 
             drvr_info[gdal.DCAP_CREATECOPY] == 'YES'):
         out_ds = in_driver.CreateCopy(outfile, in_ds, 0)
     else:
@@ -209,7 +180,7 @@ if __name__ == "__main__":
     )
     (options, args) = parser.parse_args()
     if options.input == None and options.output == None:
-        print USAGE
+        print(USAGE)
         sys.exit(0)
     print("r.kde starting...")
     kde(options)
